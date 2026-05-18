@@ -1,15 +1,14 @@
 ## dhcpd_unbound_bridge
 awk script to parse DHCP leases handed out by the ISC DHCP server and parse them into a format readable by unbound. Original written by @davidbarnhart, adapter by @robdejonge to use explicit hostnames, and updated by @cniesen to load and update dns records without restarting unbound.
 
-After unbound is started/restarted via rccl, the load_dhcp_lease_entries.sh script is run to perform the initial load of the addresses of active leases. 
-
 ### How to install (suggested):
 
 1. Place the dhcpd-lease-parser.awk script somewhere like /usr/local/sbin and make sure it's executable (chmod 755)
 2. Place the load_dhcp_lease_entries.sh script in the same directory as the unbound configuration files (e.g. /usr/local/etc/unbound/) and make sure it's also executable.  Verify the INPUTFILE, OUTPUTFILE, DOMAIN, TTL, and MAPPINGSFILE properties are correctly set in the script.
 3. (optional) Enter your mappings into the mappings.db file (which is just a text file) in a `MA:CA:DD:RE:SS myhostname` format (note the space).
 4. Ensure that unbound configuration file (e.g. /usr/local/etc/unbound/unbound.conf) has `remote-control: control-enable: yes` and that the unbound-control command works.
-5. Update the `/etc/rc.d/unbound` file to run the load_dhcp_lease_entries.sh script after start.
+5. Add a cron job for root to execute the bash script every five minutes, which refreshes the parsed leases files and reloads unbound: */5 * * * * root /usr/local/etc/unbound/load_dhcp_lease_entries.sh
+6. Optional, update the `/etc/rc.d/unbound` file to run the load_dhcp_lease_entries.sh script right after start.
 ```
 #!/bin/ksh
 #
@@ -42,7 +41,7 @@ rc_cmd $1
 ```
 
 Note that an alternative to the cron job would be to leverage the ISC DHCP server's ability to execute a command each time a lease is handed out: https://jpmens.net/2011/07/06/execute-a-script-when-isc-dhcp-hands-out-a-new-lease/ 
-For OpenBSD however, this is not an option since this feature isn't availiable with the default dhcpd server.
+OpenBSD's dhcpd implementation is leaner and does not have these features.
 
 
 ### Background by @davidbarnhart
@@ -59,3 +58,9 @@ The awk script does the majority of the work, trying to parse valid leases (thro
 ### Modification by @robdejonge
 
 Instead of using the `client-hostname` directive from the `dhcpd.leases` file, I needed a way to use explicit hostnames so that whatever each host tells `dhcpd` can be ignored and entries in `unbound` are the way I want them to be. Some devices can't be configured to use a sensible hostname, and the non-sensical ones can be hard to recall! The script will now search `mappings.db` for a match (that part admittedly an ugly hack!), and if one is found use that as the overriding hostname for the output. 
+
+### Modification by @cniesen
+
+My main motivation was to avoid restarting unbound whenever a dhcpd lease changed.  I solved this by using unbound-control to add and remove the dhcpd records while unbound is running. The script will only add/remove changes that occurred since last run. If the cron delay for the initial load after the server start is unacceptable then add the `/etc/rc.d/unbound` modification to run the dhcpd load whenever unbound is started or restarted.
+
+I had to do a few minor tweaks to support server names without domains and to get reverse lookups working.  I've added logging as well.
