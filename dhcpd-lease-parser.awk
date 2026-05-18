@@ -3,40 +3,41 @@
 BEGIN {
 
 	# settings
-	optionaldomain = DOMAIN; # optional domain name. this should get fed to the script as a parameter
+	domain = DOMAIN; # domain name. this should get fed to the script as a parameter. needs to end with a period
+	ttl = TTL; # ttl of dns record. this should get fed to the script as a parameter.
 	output_human = 0;    # set to 1 to output human-readable lease information
-	output_record = 1;   # set to 1 to output A records 
+	output_record = 1;   # set to 1 to output A records
 	output_ptr = 1;      # set to 1 to output PTR records
 }
 
 END {
 
-	if (output_human == 1) { 
-		for (macaddress in ipaddress_array) 
+	if (output_human == 1) {
+		for (macaddress in ipaddress_array)
 			printf  "# mac " macaddress ", " \
 				"host " hostname_array[macaddress] ", " \
 				"ip " ipaddress_array[macaddress] ", " \
 				timeleft_array[macaddress] " seconds left on the lease" \
 				"\n";
 	}
-		
-	if (output_record == 1) { 
-		for (macaddress in ipaddress_array)
-			printf  "local-data: \"" \
-				hostname_array[macaddress]optionaldomain \
-				" IN A " \
-				ipaddress_array[macaddress] "\"" \
-				"\n";
-	} 
 
-	if (output_ptr == 1) { 
+	if (output_record == 1) {
 		for (macaddress in ipaddress_array)
-			printf  "local-data-ptr: \"" \
-				ipaddress_array[macaddress] \
-				" " \
-				hostname_array[macaddress]optionaldomain "\"" \
+			printf  hostname_array[macaddress]domain " " \
+				ttl " IN A " \
+				ipaddress_array[macaddress]  \
 				"\n";
-	} 
+		}
+
+	if (output_ptr == 1) {
+		for (macaddress in ipaddress_array) {
+			split(ipaddress_array[macaddress], octets, ".");
+			printf  octets[4] "." octets[3] "." octets[2] "." octets[1] ".in-addr.arpa. " \
+				ttl " IN PTR " \
+				hostname_array[macaddress]domain  \
+				"\n";
+		}
+	}
 
 }
 
@@ -48,7 +49,7 @@ END {
 	declared_hostname = "";
 	fallback_hostname = "";
 	hostname = "";
-	macaddress = "";	
+	macaddress = "";
 
 	ipaddress = $2;
 }
@@ -65,7 +66,7 @@ END {
 	# put the lease end date into the format of epoch (in seconds)
 	# using the epoch makes it easier to perform date comparisons
 	"date -j -f \"%Y\/%m\/%d%H:%M:%S\" \"" $1 $2 "\" +%s" | getline enddate # FreeBSD version
-	
+
 	# do the same for the current date/time
 	#"date -j +%s" | getline currentdate # FreeBSD version
 	"date +%s" | getline currentdate
@@ -76,8 +77,8 @@ END {
 }
 
 /hardware ethernet/ {
-        gsub(/;/,"");
-        macaddress = $3;
+	gsub(/;/,"");
+	macaddress = $3;
 	gsub(/:/,"");
 	fallback_hostname = $3;
 }
@@ -102,18 +103,18 @@ END {
 		close(lookup_command)
 
 		if (length(mapped_hostname) == 0) {
-				hostname = declared_hostname;
+			hostname = declared_hostname;
 		} else {
-				hostname = mapped_hostname;
+			hostname = mapped_hostname;
 		}
 
 		if (length(hostname) == 0) {
 			hostname = fallback_hostname;
 		}
-		
+
 		# Then we need to check to see whether it's actually the latest lease or not.
 		# If a lease exists with a newer/greater enddate, then this lease should be ignored.
-		
+
 		if (macaddress in ipaddress_array) {
 			# we already have a lease recorded for this hostname
 			# check the lease enddate to see if this lease is newer than the one we had previously recorded
@@ -133,4 +134,3 @@ END {
 		}
 	}
 }
-

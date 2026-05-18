@@ -1,15 +1,48 @@
 ## dhcpd_unbound_bridge
-awk script to parse DHCP leases handed out by the ISC DHCP server and parse them into a format readable by unbound. Original written by @davidbarnhart, adapter by @robdejonge to use explicit hostnames. 
+awk script to parse DHCP leases handed out by the ISC DHCP server and parse them into a format readable by unbound. Original written by @davidbarnhart, adapter by @robdejonge to use explicit hostnames, and updated by @cniesen to load and update dns records without restarting unbound.
+
+After unbound is started/restarted via rccl, the load_dhcp_lease_entries.sh script is run to perform the initial load of the addresses of active leases. 
 
 ### How to install (suggested):
 
 1. Place the dhcpd-lease-parser.awk script somewhere like /usr/local/sbin and make sure it's executable (chmod 755)
-2. Place the load_dhcp_lease_entries.sh script in the same directory as the unbound configuration files (e.g. /usr/local/etc/unbound/) and make sure it's also executable.
+2. Place the load_dhcp_lease_entries.sh script in the same directory as the unbound configuration files (e.g. /usr/local/etc/unbound/) and make sure it's also executable.  Verify the INPUTFILE, OUTPUTFILE, DOMAIN, TTL, and MAPPINGSFILE properties are correctly set in the script.
 3. (optional) Enter your mappings into the mappings.db file (which is just a text file) in a `MA:CA:DD:RE:SS myhostname` format (note the space).
-4. Edit the unbound configuration file (e.g. /usr/local/etc/unbound/unbound.conf) and add an include line to the parsed file that is created by the load_dhcp_lease_entries.sh script (e.g. `include "/usr/local/etc/unbound/dhcp_lease_entries.conf"`)
-5. Add a cron job for root to execute the bash script every five minutes, which refreshes the parsed leases files and reloads unbound: */5	*	*	*	*	root	/usr/local/etc/unbound/load_dhcp_lease_entries.sh
+4. Ensure that unbound configuration file (e.g. /usr/local/etc/unbound/unbound.conf) has `remote-control: control-enable: yes` and that the unbound-control command works.
+5. Update the `/etc/rc.d/unbound` file to run the load_dhcp_lease_entries.sh script after start.
+```
+#!/bin/ksh
+#
+# $OpenBSD: unbound,v 1.9 2024/10/09 15:42:56 kn Exp $
 
-Note that an alternative to the cron job would be to leverage the ISC DHCP server's ability to execute a command each time a lease is handed out: https://jpmens.net/2011/07/06/execute-a-script-when-isc-dhcp-hands-out-a-new-lease/
+daemon="/usr/sbin/unbound"
+daemon_flags="-c /var/unbound/etc/unbound.conf"
+
+. /etc/rc.d/rc.subr
+
+rc_pre() {
+        local _anchor=$(/usr/sbin/unbound-checkconf -o auto-trust-anchor-file)
+
+        if [[ -n $_anchor && ! -f $_anchor ]]; then
+                /usr/sbin/unbound-anchor -v
+        fi
+
+        /usr/sbin/unbound-checkconf
+}
+
+rc_start() {
+        ${rcexec} ${daemon} ${daemon_flags} ${_bg}
+
+        if [ $? -eq 0 ]; then
+                /var/dhcpd_unbound_bridge/load_dhcp_lease_entries.sh
+        fi
+}
+
+rc_cmd $1
+```
+
+Note that an alternative to the cron job would be to leverage the ISC DHCP server's ability to execute a command each time a lease is handed out: https://jpmens.net/2011/07/06/execute-a-script-when-isc-dhcp-hands-out-a-new-lease/ 
+For OpenBSD however, this is not an option since this feature isn't availiable with the default dhcpd server.
 
 
 ### Background by @davidbarnhart
